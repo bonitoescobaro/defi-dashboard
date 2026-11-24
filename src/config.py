@@ -37,7 +37,8 @@ AAVE_PARAMS: dict = {
     "debt_asset": "USDT/USDC",
     "hf": 1.65,
     "lt": 0.80,
-    "borrow_apy": 6.0,
+    # Ставка займа по стейблам на Aave v3 Arbitrum ≈4,25% (LlamaRisk, ноябрь 2026).
+    "borrow_apy": 4.25,
     "farm_apy": 11.0,
 }
 
