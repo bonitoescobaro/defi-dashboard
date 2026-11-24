@@ -189,27 +189,10 @@ else:
 wallet_usd = 0.0
 if native_rows:
     prices = {k: v["price"] for k, v in quotes.items()}
-    rows = []
     for r in native_rows:
         if r["amount"] <= 0:
             continue
-        price = prices.get(r["symbol"], 0.0)
-        usd = float(r["amount"]) * price
-        wallet_usd += usd
-        rows.append(
-            {
-                "Сеть": r["chain"],
-                "Актив": r["symbol"],
-                "Количество": f"{r['amount']:,.4f}",
-                "Цена": f"${price:,.2f}",
-                "Стоимость": f"${usd:,.2f}",
-            }
-        )
-    st.subheader(f"На кошельках — ${wallet_usd:,.0f}")
-    if rows:
-        st.dataframe(pd.DataFrame(rows), hide_index=True, width="stretch")
-    else:
-        st.caption("Нативных балансов не найдено.")
+        wallet_usd += float(r["amount"]) * prices.get(r["symbol"], 0.0)
 
 total = wallet_usd + collateral_usd + float(hl.get("total_value") or 0)
 
