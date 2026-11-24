@@ -6,6 +6,11 @@
 
 from __future__ import annotations
 
+# Версия приложения: меняется при правках, чтобы Streamlit Cloud точно
+# перезапустил процесс, а не только перечитал скрипт (иначе в sys.modules
+# остаются старые модули из src/ и падает с TypeError).
+APP_VERSION = "1.4.0"
+
 # Тестовый портфель (снимок CoinMarketCap). Заменяется реальным источником в src/data.py.
 PORTFOLIO: list[dict] = [
     {"token": "ETH",   "cluster": "Мейджоры",           "chain": "Ethereum",        "value": 2283.15},

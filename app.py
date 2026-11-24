@@ -12,7 +12,7 @@ import pandas as pd
 import streamlit as st
 
 from src.chains import hyperliquid_totals, native_balances
-from src.config import AAVE_PARAMS, THRESHOLDS
+from src.config import AAVE_PARAMS, APP_VERSION, THRESHOLDS
 from src.data import load_portfolio
 from src.env import get
 from src.metrics import (
@@ -309,8 +309,11 @@ with sc1:
     )
 
 with sc2:
-    rows = eth_shock_table(hf, eth_price, btc_price, eth_share_pct / 100)
-    st.dataframe(pd.DataFrame(rows), hide_index=True, width="stretch")
+    try:
+        rows = eth_shock_table(hf, eth_price, btc_price, eth_share_pct / 100)
+        st.dataframe(pd.DataFrame(rows), hide_index=True, width="stretch")
+    except Exception as exc:  # блок не должен ронять всю страницу
+        st.error(f"Сценарий не посчитался: {exc}")
 
     crit = critical_drops(hf, eth_share_pct / 100)
     parts = []
@@ -359,6 +362,6 @@ if df is not None:
 
 st.divider()
 st.caption(
-    "Нативные балансы — RPC (Arbitrum, Ethereum, Base, Robinhood Chain, HyperEVM); "
-    "ERC-20 токены пока не читаются; HF и залог — Aave v3; перпы — Hyperliquid API."
+    f"Версия {APP_VERSION}. Нативные балансы — RPC (Arbitrum, Ethereum, Base, "
+    "Robinhood Chain, HyperEVM); HF и залог — Aave v3; перпы — Hyperliquid API."
 )
