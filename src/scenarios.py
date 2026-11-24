@@ -38,23 +38,33 @@ def hf_after_drop(hf: float, drop_pct: float, share: float = 1.0) -> float:
 def eth_shock_table(
     hf: float,
     eth_price: float,
+    btc_price: float | None = None,
     share: float = 1.0,
     drops: tuple[int, ...] = (10, 20, 30, 40, 50),
 ) -> list[dict]:
-    """Строки для таблицы: падение, цена ETH, новый HF, зона, действие."""
+    """Строки для таблицы: падение, цены ETH и BTC на этом уровне, новый HF, зона.
+
+    BTC считается падающим на тот же процент, что и ETH — так таблица отвечает
+    на вопрос «где окажется цена и HF, если крипто-часть залога просядет на X%».
+    """
     rows: list[dict] = []
     for drop in drops:
         new_hf = hf_after_drop(hf, drop, share)
         label, action = zone(new_hf)
-        rows.append(
+        row = {
+            "Падение": f"−{drop}%",
+            "Цена ETH": f"${eth_price * (1 - drop / 100):,.0f}",
+        }
+        if btc_price:
+            row["Цена BTC"] = f"${btc_price * (1 - drop / 100):,.0f}"
+        row.update(
             {
-                "Падение ETH": f"−{drop}%",
-                "Цена ETH": f"${eth_price * (1 - drop / 100):,.0f}",
                 "Новый HF": f"{new_hf:.2f}",
                 "Зона": label,
                 "Что делать": action,
             }
         )
+        rows.append(row)
     return rows
 
 

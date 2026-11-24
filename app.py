@@ -285,26 +285,31 @@ st.caption(
 )
 
 # ------------------------------------------------------------------ сценарий ETH
-st.subheader("Сценарий: ETH падает")
+st.subheader("Сценарий: ETH и BTC падают")
 st.caption(
-    "HF = HF × (1 − падение × доля ETH в залоге). Долг считаем неизменным — "
-    "это худший, но самый понятный сценарий."
+    "HF = HF × (1 − падение × доля крипто-части залога). Оба актива считаются "
+    "падающими на одинаковый процент, долг — неизменным."
 )
 
 eth_price_default = float((quotes.get("ETH") or {}).get("price") or 1700.0)
+btc_price_default = float((quotes.get("BTC") or {}).get("price") or 60000.0)
 sc1, sc2 = st.columns([1, 3])
 with sc1:
     eth_price = st.number_input(
         "Текущая цена ETH", min_value=1.0, value=eth_price_default, step=10.0,
         help="Подставляется из CoinMarketCap, можно поправить вручную.",
     )
+    btc_price = st.number_input(
+        "Текущая цена BTC", min_value=1.0, value=btc_price_default, step=100.0,
+        help="В таблице BTC падает на тот же процент, что и ETH.",
+    )
     eth_share_pct = st.slider(
-        "Доля ETH в залоге, %", min_value=10, max_value=100, value=100, step=5,
-        help="Если в залоге только ETH — 100%. Если ETH и WBTC примерно пополам — ~50%.",
+        "Доля крипто-части в залоге, %", min_value=10, max_value=100, value=100, step=5,
+        help="Если в залоге только ETH и WBTC — 100%. Если половина залога в стейблах — ~50%.",
     )
 
 with sc2:
-    rows = eth_shock_table(hf, eth_price, eth_share_pct / 100)
+    rows = eth_shock_table(hf, eth_price, btc_price, eth_share_pct / 100)
     st.dataframe(pd.DataFrame(rows), hide_index=True, width="stretch")
 
     crit = critical_drops(hf, eth_share_pct / 100)
@@ -315,7 +320,10 @@ with sc2:
             continue
         parts.append(f"{label} — падение на {value:.0f}%" if value > 0 else f"{label} — уже пройден")
     note = " · ".join(parts)
-    st.caption(f"До {note}. При доле ETH {eth_share_pct}% остальная часть залога считается устойчивой.")
+    st.caption(
+        f"До {note}. При доле крипто-части {eth_share_pct}% остальное в залоге "
+        "(стейблы) считается устойчивым."
+    )
 
     chart = pd.DataFrame(
         {
