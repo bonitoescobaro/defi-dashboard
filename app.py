@@ -23,6 +23,7 @@ from src.metrics import (
     health_factor_report,
 )
 from src.prices import get_quotes
+from src.scenarios import critical_drops, eth_shock_table, hf_after_drop
 from src.wallet import RPC, aave_account, is_address
 
 MAIN_ASSETS = ("BTC", "ETH", "HYPE")
@@ -299,6 +300,47 @@ st.caption(
     "Проценты — падение стоимости залога, при котором HF дойдёт до уровня. "
     "Долг считается как LT / HF от залога."
 )
+
+# ------------------------------------------------------------------ сценарий ETH
+st.subheader("Сценарий: ETH падает")
+st.caption(
+    "HF = HF × (1 − падение × доля ETH в залоге). Долг считаем неизменным — "
+    "это худший, но самый понятный сценарий."
+)
+
+eth_price_default = float((quotes.get("ETH") or {}).get("price") or 1700.0)
+sc1, sc2 = st.columns([1, 3])
+with sc1:
+    eth_price = st.number_input(
+        "Текущая цена ETH", min_value=1.0, value=eth_price_default, step=10.0,
+        help="Подставляется из CoinMarketCap, можно поправить вручную.",
+    )
+    eth_share_pct = st.slider(
+        "Доля ETH в залоге, %", min_value=10, max_value=100, value=100, step=5,
+        help="Если в залоге только ETH — 100%. Если ETH и WBTC примерно пополам — ~50%.",
+    )
+
+with sc2:
+    rows = eth_shock_table(hf, eth_price, eth_share_pct / 100)
+    st.dataframe(pd.DataFrame(rows), hide_index=True, width="stretch")
+
+    crit = critical_drops(hf, eth_share_pct / 100)
+    parts = []
+    for target, label in ((1.5, "HF 1.5"), (1.4, "HF 1.4"), (1.0, "ликвидации")):
+        value = crit.get(f"hf_{target}")
+        if value is None:
+            continue
+        parts.append(f"{label} — падение на {value:.0f}%" if value > 0 else f"{label} — уже пройден")
+    note = " · ".join(parts)
+    st.caption(f"До {note}. При доле ETH {eth_share_pct}% остальная часть залога считается устойчивой.")
+
+    chart = pd.DataFrame(
+        {
+            "Падение ETH, %": [10, 20, 30, 40, 50],
+            "HF": [hf_after_drop(hf, d, eth_share_pct / 100) for d in (10, 20, 30, 40, 50)],
+        }
+    ).set_index("Падение ETH, %")
+    st.line_chart(chart, height=260)
 
 # ------------------------------------------------------------------ снимок CMC
 try:
