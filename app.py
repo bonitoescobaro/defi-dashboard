@@ -7,13 +7,15 @@ from __future__ import annotations
 
 import os
 import re
+from datetime import datetime, timedelta, timezone
 
+import altair as alt
 import pandas as pd
 import streamlit as st
 
 from src.chains import hyperliquid_totals, native_balances
 from src.config import AAVE_PARAMS, APP_VERSION, THRESHOLDS
-from src.data import load_portfolio
+from src.data import portfolio_snapshot
 from src.env import get
 from src.metrics import (
     allocations,
@@ -22,11 +24,12 @@ from src.metrics import (
     dust,
     health_factor_report,
 )
-from src.prices import get_quotes
+from src.prices import get_quotes_by_ids
 from src.scenarios import critical_drops, eth_shock_table, hf_after_drop
 from src.wallet import RPC, aave_account, is_address
 
 MAIN_ASSETS = ("BTC", "ETH", "HYPE")
+MAIN_ASSET_IDS = (1, 1027, 32196)  # id монет в CoinMarketCap
 
 st.set_page_config(page_title="DeFi Dashboard", page_icon="📊", layout="wide")
 
@@ -71,9 +74,11 @@ require_password()
 
 
 # ------------------------------------------------------------------ кэш
-@st.cache_data(ttl=60, show_spinner=False)
-def cached_quotes(symbols: tuple[str, ...]) -> tuple[dict, str | None]:
-    return get_quotes(list(symbols))
+@st.cache_data(ttl=1800, show_spinner=False)
+def cached_quotes(ids: tuple[int, ...]) -> tuple[dict, str | None]:
+    """Цены главных активов по id, разложенные по тикерам."""
+    raw, err = get_quotes_by_ids(list(ids))
+    return ({v["symbol"]: v for v in raw.values()}, err)
 
 
 @st.cache_data(ttl=300, show_spinner=False)
@@ -94,7 +99,7 @@ def cached_aave(address: str, chain: str) -> dict:
 st.title("DeFi Dashboard")
 
 # ------------------------------------------------------------------ цены
-quotes, price_error = cached_quotes(MAIN_ASSETS)
+quotes, price_error = cached_quotes(MAIN_ASSET_IDS)
 if price_error:
     st.warning(price_error)
 
@@ -106,7 +111,7 @@ if quotes:
             col.metric(symbol, "—")
             continue
         col.metric(symbol, f"${q['price']:,.2f}", f"{q['change_24h']:+.2f}% за 24ч")
-    st.caption("Цены — CoinMarketCap, кэш 60 секунд.")
+    st.caption("Цены — CoinMarketCap, кэш 30 минут.")
 
 # ------------------------------------------------------------------ сайдбар
 with st.sidebar:
@@ -336,29 +341,79 @@ with sc2:
     ).set_index("Падение ETH, %")
     st.line_chart(chart, height=260)
 
-# ------------------------------------------------------------------ снимок CMC
-try:
-    df, snap_total = allocations(load_portfolio())
-except Exception as exc:
-    df, snap_total = None, 0.0
-    st.caption(f"Снимок портфеля недоступен: {exc}")
+# ------------------------------------------------------------------ портфель (живые цены CMC)
+@st.cache_data(ttl=10800, show_spinner=False)
+def cached_portfolio() -> tuple[pd.DataFrame, float, str | None, str | None]:
+    """Портфель с ценами CoinMarketCap. Кэш 3 часа: несколько обновлений в сутки."""
+    return portfolio_snapshot()
 
-if df is not None:
-    with st.expander(f"Снимок из CoinMarketCap — ${snap_total:,.0f} (ручной, для сверки)"):
-        left, right = st.columns([3, 2])
-        with left:
-            view = df.assign(
-                Стоимость=df["value"].map(lambda x: f"${x:,.2f}"),
-                Доля=df["share_pct"].map(lambda x: f"{x:.1f}%"),
-            )[["token", "cluster", "chain", "Стоимость", "Доля"]]
-            view.columns = ["Токен", "Кластер", "Сеть", "Стоимость", "Доля"]
-            st.dataframe(view, hide_index=True, width="stretch", height=380)
-        with right:
-            st.caption("Сумма по кластерам, $")
-            st.bar_chart(cluster_summary(df).set_index("cluster")["value"], height=360)
 
-        d = dust(df, THRESHOLDS["dust_limit"])
-        st.caption(f"Пыль: {len(d)} позиций на ${d['value'].sum():,.0f}.")
+def _msk_stamp(value: str | None) -> str:
+    """Время CMC (UTC) → «25.11 14:20 МСК»."""
+    if not value:
+        return "—"
+    try:
+        dt = datetime.fromisoformat(str(value).replace("Z", "+00:00")).astimezone(
+            timezone(timedelta(hours=3))
+        )
+        return dt.strftime("%d.%m %H:%M МСК")
+    except Exception:
+        return str(value)
+
+
+@st.fragment(run_every="3h")
+def render_portfolio() -> None:
+    raw, total, stamp, err = cached_portfolio()
+    if err:
+        st.warning(err)
+
+    df, total = allocations(raw)
+
+    head, btn = st.columns([5, 1])
+    head.subheader(f"Портфель по CoinMarketCap — ${total:,.0f}")
+    btn.button("Обновить", on_click=cached_portfolio.clear, width="stretch")
+    st.caption(
+        f"Считается как количество × цена CMC, обновление раз в 3 часа. "
+        f"Данные на {_msk_stamp(stamp)}."
+    )
+
+    left, right = st.columns([3, 2])
+    with left:
+        view = df.assign(
+            Цена=df["price"].map(lambda x: f"${x:,.6f}" if x < 1 else f"${x:,.2f}"),
+            Δ24ч=df["change_24h"].map(lambda x: f"{x:+.1f}%"),
+            Стоимость=df["value"].map(lambda x: f"${x:,.2f}"),
+            Доля=df["share_pct"].map(lambda x: f"{x:.1f}%"),
+        )[["token", "cluster", "chain", "Цена", "Δ24ч", "Стоимость", "Доля"]]
+        view.columns = ["Токен", "Кластер", "Сеть", "Цена", "Δ24ч", "Стоимость", "Доля"]
+        st.dataframe(view, hide_index=True, width="stretch", height=430)
+
+    with right:
+        clusters = cluster_summary(df)
+        pie = (
+            alt.Chart(clusters)
+            .mark_arc(innerRadius=48, outerRadius=148)
+            .encode(
+                theta=alt.Theta("value:Q"),
+                color=alt.Color(
+                    "cluster:N",
+                    legend=alt.Legend(title=None, orient="bottom", columns=2),
+                ),
+                tooltip=[
+                    alt.Tooltip("cluster:N", title="Кластер"),
+                    alt.Tooltip("value:Q", title="Стоимость, $", format=",.0f"),
+                    alt.Tooltip("share_pct:Q", title="Доля, %", format=".1f"),
+                ],
+            )
+            .properties(height=430, title="Доли по кластерам")
+        )
+        st.altair_chart(pie, width="stretch")
+
+    d = dust(df, THRESHOLDS["dust_limit"])
+    st.caption(f"Пыль: {len(d)} позиций на ${d['value'].sum():,.0f}.")
+
+
+render_portfolio()
 
 st.divider()
 st.caption(
