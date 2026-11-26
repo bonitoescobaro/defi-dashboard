@@ -16,7 +16,7 @@ import streamlit as st
 from src.chains import hyperliquid_totals, native_balances
 from src.config import AAVE_PARAMS, APP_VERSION, COST_BASIS, THRESHOLDS
 from src.data import portfolio_snapshot
-from src.dca import SCHEMES, add_options, average_after_add, dca_plan, parse_levels
+from src.dca import SCHEMES, add_options, average_after_add, dca_plan, monthly_plan, parse_levels
 from src.env import get
 from src.metrics import (
     allocations,
@@ -355,10 +355,25 @@ dca_live = float(
 
 d1, d2 = st.columns([1, 2])
 with d1:
-    dca_start = st.number_input(
-        "Стартовая цена", min_value=1.0, value=round(dca_live, 2), step=10.0,
-        key="dca_start", help="От неё отсчитываем просадку: цена входа или текущий уровень.",
+    dca_anchor = st.radio(
+        "Якорь для уровней", ("текущая цена", "цена на 1-е число", "своя"),
+        key="dca_anchor",
+        help="От чего отсчитываем уровни. Скользящий якорь (цена на 1-е число) "
+             "надо обновлять каждый месяц — тогда уровни всегда впереди рынка.",
     )
+    if dca_anchor == "текущая цена":
+        dca_start = round(dca_live, 2)
+        st.caption(f"Якорь: текущая цена, ${dca_start:,.0f}")
+    elif dca_anchor == "цена на 1-е число":
+        dca_start = st.number_input(
+            "Цена на 1-е число, $", min_value=1.0, value=round(dca_live, 2),
+            step=10.0, key="dca_month_start",
+        )
+    else:
+        dca_start = st.number_input(
+            "Своя стартовая цена, $", min_value=1.0, value=round(dca_live * 1.2, 2),
+            step=10.0, key="dca_custom_start",
+        )
     dca_current = st.number_input(
         "Текущая цена", min_value=1.0, value=round(dca_live, 2), step=10.0,
         key="dca_current",
@@ -408,6 +423,59 @@ with d2:
                 f"Если сработают все уровни — {plan['qty_total']:,.4f} {dca_asset} "
                 f"по средней ${plan['avg_price']:,.0f}."
             )
+
+st.subheader("Месячный режим: рынок + резерв")
+st.caption(
+    "Регулярная часть покупает по календарю и не зависит от цены. Резерв копится "
+    "и тратится по уровням из плана выше — только на свободные деньги, не на те, "
+    "что держат HF в Aave."
+)
+
+mc1, mc2 = st.columns([1, 2])
+with mc1:
+    m_budget = st.number_input(
+        "Бюджет в месяц, $", min_value=1.0, value=500.0, step=50.0, key="m_budget"
+    )
+    m_share = st.slider(
+        "Доля в рынок, %", min_value=0, max_value=100, value=70, step=5, key="m_share"
+    )
+    m_target = st.number_input(
+        "Целевой резерв, $", min_value=0.0, value=1000.0, step=100.0, key="m_target",
+        help="Размер снайперского резерва, который хочешь накопить под уровни.",
+    )
+
+with mc2:
+    try:
+        mp = monthly_plan(m_budget, m_share, m_target)
+        t1, t2, t3 = st.columns(3)
+        t1.metric("В рынок / мес", f"${mp['market_month']:,.0f}")
+        t2.metric("В резерв / мес", f"${mp['reserve_month']:,.0f}")
+        mt = mp["months_to_target"]
+        t3.metric(
+            "Резерв собран",
+            f"{mt} мес" if mt else "—",
+            f"цель ${m_target:,.0f}",
+            delta_color="off",
+        )
+
+        monthly_table = pd.DataFrame(
+            [
+                {
+                    "Месяц": r["month"],
+                    "В рынок": f"${r['market']:,.0f}",
+                    "В резерв": f"${r['reserve_month']:,.0f}",
+                    "Резерв накоплен": f"${r['reserve_cum']:,.0f}",
+                    "Потрачено всего": f"${r['spent_total']:,.0f}",
+                }
+                for r in mp["rows"]
+            ]
+        )
+        st.dataframe(monthly_table, hide_index=True, width="stretch", height=300)
+
+        if mp["reserve_month"] <= 0:
+            st.warning("Доля в рынок 100%: резерв не копится, уровни останутся без денег.")
+    except Exception as exc:
+        st.error(f"Не посчитать месячный режим: {exc}")
 
 # ------------------------------------------------------------------ средняя цена и усреднение
 st.subheader("Средняя цена ETH и усреднение")

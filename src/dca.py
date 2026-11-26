@@ -138,3 +138,50 @@ def add_options(
         res = average_after_add(qty, avg_price, amount, price)
         rows.append({"amount": amount, **res})
     return rows
+
+
+def monthly_plan(
+    monthly_budget: float,
+    market_share_pct: float = 70.0,
+    reserve_target: float = 1000.0,
+    months: int = 12,
+) -> dict:
+    """Месячный режим: часть бюджета идёт в рынок, часть копится на уровни.
+
+    Возвращает суммы по месяцам, накопленный резерв и за сколько месяцев он
+    дотянет до целевого размера.
+    """
+    if monthly_budget <= 0:
+        raise ValueError("Месячный бюджет должен быть больше нуля")
+    share = min(max(market_share_pct, 0.0), 100.0) / 100
+    market = monthly_budget * share
+    reserve = monthly_budget - market
+
+    rows: list[dict] = []
+    cumulative = 0.0
+    months_to_target: int | None = None
+    for month in range(1, months + 1):
+        cumulative += reserve
+        if months_to_target is None and cumulative >= reserve_target:
+            months_to_target = month
+        rows.append(
+            {
+                "month": month,
+                "market": market,
+                "reserve_month": reserve,
+                "reserve_cum": cumulative,
+                "spent_total": monthly_budget * month,
+            }
+        )
+
+    return {
+        "monthly_budget": monthly_budget,
+        "market_month": market,
+        "reserve_month": reserve,
+        "market_share_pct": share * 100,
+        "reserve_target": reserve_target,
+        "months_to_target": months_to_target,
+        "rows": rows,
+        "market_total": market * months,
+        "reserve_total": reserve * months,
+    }
