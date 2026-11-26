@@ -388,7 +388,27 @@ def render_portfolio() -> None:
         st.dataframe(view, hide_index=True, width="stretch", height=430)
 
     with right:
-        pie_src = df[["token", "cluster", "value", "share_pct"]].copy()
+        limit = THRESHOLDS["pie_dust"]
+        cols = ["token", "cluster", "value", "share_pct"]
+        pie_src = df.loc[df["value"] >= limit, cols].copy()
+        small = df.loc[df["value"] < limit]
+        if not small.empty:
+            pie_src = pd.concat(
+                [
+                    pie_src,
+                    pd.DataFrame(
+                        [
+                            {
+                                "token": f"прочее ({len(small)})",
+                                "cluster": "прочее",
+                                "value": float(small["value"].sum()),
+                                "share_pct": float(small["share_pct"].sum()),
+                            }
+                        ]
+                    ),
+                ],
+                ignore_index=True,
+            )
         pie = (
             alt.Chart(pie_src)
             .mark_arc(innerRadius=48, outerRadius=148)
