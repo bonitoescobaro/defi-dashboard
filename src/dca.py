@@ -104,3 +104,37 @@ def dca_plan(
         "avg_price": avg_price,
         "current_drop_pct": (start_price - current_price) / start_price * 100,
     }
+
+
+def average_after_add(
+    qty: float, avg_price: float, add_usd: float, price: float
+) -> dict:
+    """Новая средняя цена после покупки на add_usd по цене price."""
+    if qty < 0 or avg_price <= 0 or price <= 0:
+        raise ValueError("Количество должно быть ≥ 0, цены — больше нуля")
+    spend = qty * avg_price
+    added_qty = add_usd / price if add_usd > 0 else 0.0
+    new_qty = qty + added_qty
+    new_avg = (spend + add_usd) / new_qty if new_qty else 0.0
+    return {
+        "qty": new_qty,
+        "added_qty": added_qty,
+        "avg_price": new_avg,
+        "avg_change": new_avg - avg_price,
+        "spend": spend + add_usd,
+        "value": new_qty * price,
+    }
+
+
+def add_options(
+    qty: float,
+    avg_price: float,
+    price: float,
+    amounts: tuple[float, ...] = (300, 500, 1000, 1500, 2000),
+) -> list[dict]:
+    """Варианты долива: что станет со средней при разных суммах."""
+    rows = []
+    for amount in amounts:
+        res = average_after_add(qty, avg_price, amount, price)
+        rows.append({"amount": amount, **res})
+    return rows

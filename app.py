@@ -14,9 +14,9 @@ import pandas as pd
 import streamlit as st
 
 from src.chains import hyperliquid_totals, native_balances
-from src.config import AAVE_PARAMS, APP_VERSION, THRESHOLDS
+from src.config import AAVE_PARAMS, APP_VERSION, COST_BASIS, THRESHOLDS
 from src.data import portfolio_snapshot
-from src.dca import SCHEMES, dca_plan, parse_levels
+from src.dca import SCHEMES, add_options, average_after_add, dca_plan, parse_levels
 from src.env import get
 from src.metrics import (
     allocations,
@@ -408,6 +408,70 @@ with d2:
                 f"Если сработают все уровни — {plan['qty_total']:,.4f} {dca_asset} "
                 f"по средней ${plan['avg_price']:,.0f}."
             )
+
+# ------------------------------------------------------------------ средняя цена и усреднение
+st.subheader("Средняя цена ETH и усреднение")
+st.caption(
+    "Средняя — из личного учёта (правится в `src/config.py`, COST_BASIS). "
+    "Показывает, сколько нужно роста цены до нуля и что даст долив."
+)
+
+eth_cost = COST_BASIS.get("ETH", {"qty": 1.2963, "avg": 2445.32})
+eth_now = float((quotes.get("ETH") or {}).get("price") or 1700.0)
+
+cb1, cb2 = st.columns([1, 2])
+with cb1:
+    cb_qty = st.number_input(
+        "Количество ETH", min_value=0.0, value=float(eth_cost["qty"]),
+        step=0.01, format="%.4f", key="cb_qty",
+    )
+    cb_avg = st.number_input(
+        "Средняя цена входа, $", min_value=1.0, value=float(eth_cost["avg"]),
+        step=1.0, key="cb_avg",
+    )
+    cb_add = st.number_input(
+        "Долить сейчас, $", min_value=0.0, value=500.0, step=50.0, key="cb_add"
+    )
+
+with cb2:
+    try:
+        spend = cb_qty * cb_avg
+        value = cb_qty * eth_now
+        pnl = value - spend
+        need = (cb_avg / eth_now - 1) * 100 if eth_now else 0.0
+        res = average_after_add(cb_qty, cb_avg, cb_add, eth_now)
+
+        k1, k2, k3 = st.columns(3)
+        k1.metric("Стоимость", f"${value:,.0f}", f"${pnl:,.0f}")
+        k2.metric(
+            "Средняя после долива",
+            f"${res['avg_price']:,.0f}",
+            f"{res['avg_change']:+,.0f}",
+            delta_color="inverse",
+        )
+        k3.metric("До нуля", f"+{need:.1f}%", "рост цены от текущей", delta_color="off")
+        st.caption(
+            f"Вложено ${spend:,.0f} · сейчас ${value:,.0f} · "
+            f"{'в минусе' if pnl < 0 else 'в плюсе'} {pnl / spend * 100 if spend else 0:+.1f}%. "
+            f"После долива на ${cb_add:,.0f} нужно +{(res['avg_price'] / eth_now - 1) * 100:.1f}%."
+        )
+
+        opts = add_options(cb_qty, cb_avg, eth_now)
+        table = pd.DataFrame(
+            [
+                {
+                    "Долив": f"${o['amount']:,.0f}",
+                    "Новая средняя": f"${o['avg_price']:,.0f}",
+                    "Изменение": f"{o['avg_change']:+.0f}",
+                    "Куплено ETH": f"{o['added_qty']:,.4f}",
+                    "Всего ETH": f"{o['qty']:,.4f}",
+                }
+                for o in opts
+            ]
+        )
+        st.dataframe(table, hide_index=True, width="stretch")
+    except Exception as exc:
+        st.error(f"Не посчитать усреднение: {exc}")
 
 # ------------------------------------------------------------------ портфель (живые цены CMC)
 @st.cache_data(ttl=10800, show_spinner=False)
