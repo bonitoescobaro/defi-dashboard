@@ -116,6 +116,44 @@ if quotes:
         col.metric(symbol, f"${q['price']:,.2f}", f"{q['change_24h']:+.2f}% за 24ч")
     st.caption("Цены — CoinMarketCap, кэш 30 минут.")
 
+# ------------------------------------------------------------------ навигация
+NAV_CSS = """
+<style>
+.nav-links { display:flex; gap:8px; flex-wrap:wrap; margin:4px 0 14px; }
+.nav-links a {
+  padding:6px 13px; border:1px solid rgba(255,255,255,.18); border-radius:9px;
+  text-decoration:none; color:#E6EDF3; font-size:14px; line-height:1.2;
+}
+.nav-links a:hover { background:rgba(79,139,249,.16); border-color:#4F8BF9; }
+.nav-anchor { position:relative; top:-70px; }
+</style>
+"""
+
+NAV_ITEMS = (
+    ("Лендинг", "nav-lending"),
+    ("Сценарий", "nav-scenario"),
+    ("DCA", "nav-dca"),
+    ("GM", "nav-gm"),
+    ("Месячный режим", "nav-monthly"),
+    ("Портфель", "nav-portfolio"),
+)
+
+
+def anchor(section_id: str) -> None:
+    """Ставит якорь перед разделом, чтобы навигация точно попадала в него."""
+    st.markdown(
+        f'<div id="{section_id}" class="nav-anchor"></div>', unsafe_allow_html=True
+    )
+
+
+def render_nav() -> None:
+    st.markdown(NAV_CSS, unsafe_allow_html=True)
+    links = "".join(f'<a href="#{sid}">{label}</a>' for label, sid in NAV_ITEMS)
+    st.markdown(f'<div class="nav-links">{links}</div>', unsafe_allow_html=True)
+
+
+render_nav()
+
 # ------------------------------------------------------------------ сайдбар
 with st.sidebar:
     st.header("Кошельки")
@@ -235,6 +273,7 @@ for err in hl.get("errors", []):
 hfr = health_factor_report(hf, lt)
 carry = carry_report(farm_apy, borrow_apy)
 
+anchor("nav-lending")
 st.subheader("Позиция в лендинге")
 c1, c2, c3, c4 = st.columns(4)
 c1.metric("Health factor", f"{hf:.2f}", f"запас до 1.0: −{hfr['drop_to_liquidation_pct']:.0f}%")
@@ -293,6 +332,7 @@ st.caption(
 )
 
 # ------------------------------------------------------------------ сценарий ETH
+anchor("nav-scenario")
 st.subheader("Сценарий: ETH и BTC падают")
 st.caption(
     "HF = HF × (1 − падение × доля крипто-части залога). Оба актива считаются "
@@ -345,6 +385,7 @@ with sc2:
     st.line_chart(chart, height=260)
 
 # ------------------------------------------------------------------ DCA-калькулятор
+anchor("nav-dca")
 st.subheader("DCA-калькулятор: ETH и BTC")
 st.caption(
     "Уровни — падение от стартовой цены. Бюджет делится между уровнями, уровень "
@@ -428,6 +469,7 @@ with d2:
             )
 
 # ------------------------------------------------------------------ GM-калькулятор
+anchor("nav-gm")
 st.subheader("GM-калькулятор: BTC и ETH")
 st.caption(
     "Как в таблице: уровни считаются от базовой цены актива, доли берутся из схемы "
@@ -518,6 +560,7 @@ with ge:
         )
 
 # ------------------------------------------------------------------ месячный режим
+anchor("nav-monthly")
 st.subheader("Месячный режим: рынок + резерв")
 st.caption(
     "Регулярная часть покупает по календарю и не зависит от цены. Резерв копится "
@@ -599,6 +642,7 @@ def render_portfolio() -> None:
 
     df, total = allocations(raw)
 
+    anchor("nav-portfolio")
     head, btn = st.columns([5, 1])
     head.subheader(f"Портфель по CoinMarketCap — ${total:,.0f}")
     btn.button("Обновить", on_click=cached_portfolio.clear, width="stretch")
