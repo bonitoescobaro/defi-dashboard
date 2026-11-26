@@ -16,6 +16,7 @@ import streamlit as st
 from src.chains import hyperliquid_totals, native_balances
 from src.config import AAVE_PARAMS, APP_VERSION, THRESHOLDS
 from src.data import portfolio_snapshot
+from src.dca import SCHEMES, dca_plan, parse_levels
 from src.env import get
 from src.metrics import (
     allocations,
@@ -339,6 +340,74 @@ with sc2:
         }
     ).set_index("Падение ETH, %")
     st.line_chart(chart, height=260)
+
+# ------------------------------------------------------------------ DCA-калькулятор
+st.subheader("DCA-калькулятор: ETH и BTC")
+st.caption(
+    "Уровни — падение от стартовой цены. Бюджет делится между уровнями, уровень "
+    "считается сработавшим, если текущая цена уже ниже его цены."
+)
+
+dca_asset = st.radio("Актив", ("ETH", "BTC"), horizontal=True, key="dca_asset")
+dca_live = float(
+    (quotes.get(dca_asset) or {}).get("price") or (1700.0 if dca_asset == "ETH" else 60000.0)
+)
+
+d1, d2 = st.columns([1, 2])
+with d1:
+    dca_start = st.number_input(
+        "Стартовая цена", min_value=1.0, value=round(dca_live, 2), step=10.0,
+        key="dca_start", help="От неё отсчитываем просадку: цена входа или текущий уровень.",
+    )
+    dca_current = st.number_input(
+        "Текущая цена", min_value=1.0, value=round(dca_live, 2), step=10.0,
+        key="dca_current",
+    )
+    dca_budget = st.number_input(
+        "Средства, $", min_value=1.0, value=1000.0, step=50.0, key="dca_budget"
+    )
+    dca_scheme = st.selectbox("Распределение бюджета", list(SCHEMES), key="dca_scheme")
+    dca_levels_raw = st.text_input(
+        "Уровни докупки, %", value="10, 20, 30, 50, 70", key="dca_levels"
+    )
+
+with d2:
+    drops = parse_levels(dca_levels_raw)
+    if not drops:
+        st.error("Укажи хотя бы один уровень, например: 10, 20, 30, 50, 70")
+    else:
+        try:
+            plan = dca_plan(dca_start, dca_current, dca_budget, drops, dca_scheme)
+        except Exception as exc:
+            st.error(f"Не посчитать: {exc}")
+            plan = None
+
+        if plan:
+            hit = sum(1 for l in plan["levels"] if l["passed"])
+            m1, m2, m3 = st.columns(3)
+            m1.metric("Купить сейчас", f"${plan['spend_now']:,.0f}", f"{hit} из {len(plan['levels'])} уровней")
+            m2.metric("Резерв", f"${plan['reserve']:,.0f}", "остаётся на докупки", delta_color="off")
+            m3.metric("Средняя цена", f"${plan['avg_price']:,.0f}", "если сработают все", delta_color="off")
+
+            table = pd.DataFrame(
+                [
+                    {
+                        "Уровень": f"−{l['drop_pct']:.0f}%",
+                        "Цена": f"${l['price']:,.0f}",
+                        "Статус": "купить сейчас" if l["passed"] else f"ждём ещё −{l['distance_pct']:.0f}%",
+                        "Сумма": f"${l['allocation']:,.0f}",
+                        "Количество": f"{l['qty']:,.4f} {dca_asset}",
+                        "Доля бюджета": f"{l['share_pct']:.0f}%",
+                    }
+                    for l in plan["levels"]
+                ]
+            )
+            st.dataframe(table, hide_index=True, width="stretch")
+            st.caption(
+                f"Просадка от стартовой цены: {plan['current_drop_pct']:+.1f}%. "
+                f"Если сработают все уровни — {plan['qty_total']:,.4f} {dca_asset} "
+                f"по средней ${plan['avg_price']:,.0f}."
+            )
 
 # ------------------------------------------------------------------ портфель (живые цены CMC)
 @st.cache_data(ttl=10800, show_spinner=False)
