@@ -1,25 +1,30 @@
 """GM-калькулятор: продажа пуловых токенов (GM) по уровням цены.
 
-Логика уровней:
-- уровни задаются в процентах от входной цены и работают в обе стороны
-  (рост — лестница фиксации, падение — сокращение риска);
-- схема «кумулятивно»: к уровню X% продано суммарно X% исходной позиции
-  (между уровнями продаётся разница);
-- схема «равными долями»: на каждом уровне продаётся 1/n исходной позиции.
+Три схемы:
+- «моя схема» — уровни 10…80% с долями 10/10/12/13/15/15/10/5 (итого 90% позиции);
+- «кумулятивно» — к уровню X% продано суммарно X% исходной позиции;
+- «равными долями» — на каждом уровне по 1/n позиции.
 
-Текущая цена нужна, чтобы показать, какие уровни уже пройдены.
+Уровни работают в обе стороны: рост — лестница фиксации, падение — сокращение риска.
 """
 
 from __future__ import annotations
 
-SCHEMES = ("кумулятивно", "равными долями")
+PRESETS: dict[str, dict] = {
+    "моя схема": {
+        "levels": [10, 20, 30, 40, 50, 60, 70, 80],
+        "shares": [10, 10, 12, 13, 15, 15, 10, 5],
+    }
+}
+
+SCHEMES = ("моя схема", "кумулятивно", "равными долями")
 
 
 def gm_ladder(
     entry_price: float,
     current_price: float,
     qty: float,
-    levels: list[float],
+    levels: list[float] | None = None,
     direction: str = "рост",
     scheme: str = "кумулятивно",
 ) -> dict:
@@ -33,18 +38,28 @@ def gm_ladder(
     if qty <= 0:
         raise ValueError("Количество GM должно быть больше нуля")
 
-    levels = sorted(set(l for l in levels if 0 < l < 100))
+    shares: list[float] | None = None
+    if scheme == "моя схема":
+        preset = PRESETS["моя схема"]
+        levels = list(preset["levels"])
+        shares = list(preset["shares"])
+
+    levels = sorted(set(l for l in (levels or []) if 0 < l < 100))
     if not levels:
         raise ValueError("Нужен хотя бы один уровень, например: 10, 30, 50, 70")
+    if shares is not None and len(shares) != len(levels):
+        shares = None  # пресет не совпал с уровнями — падаем на стандартную схему
 
     step = 100.0 / len(levels)
     rows: list[dict] = []
     prev_share = 0.0
 
-    for level in levels:
+    for index, level in enumerate(levels):
         price = entry_price * (1 + level / 100 if direction == "рост" else 1 - level / 100)
 
-        if scheme == "равными долями":
+        if shares is not None:
+            share = shares[index]
+        elif scheme == "равными долями":
             share = step
         else:  # кумулятивно
             share = level - prev_share
@@ -73,8 +88,7 @@ def gm_ladder(
     passed_rows = [r for r in rows if r["passed"]]
     sell_now = sum(r["sell_qty"] for r in passed_rows)
     revenue_now = sum(r["revenue"] for r in passed_rows)
-    qty_sold_now = sell_now
-    avg_sell = revenue_now / qty_sold_now if qty_sold_now else 0.0
+    avg_sell = revenue_now / sell_now if sell_now else 0.0
 
     return {
         "rows": rows,
@@ -84,9 +98,9 @@ def gm_ladder(
         "direction": direction,
         "scheme": scheme,
         "sell_now": sell_now,
-        "remaining_now": qty - qty_sold_now,
+        "remaining_now": qty - sell_now,
         "revenue_now": revenue_now,
         "avg_sell_price": avg_sell,
-        "sold_pct": qty_sold_now / qty * 100,
+        "sold_pct": sell_now / qty * 100,
         "change_pct": (current_price / entry_price - 1) * 100,
     }

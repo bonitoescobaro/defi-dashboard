@@ -18,6 +18,7 @@ from src.config import AAVE_PARAMS, APP_VERSION, THRESHOLDS
 from src.data import portfolio_snapshot
 from src.dca import SCHEMES, dca_plan, monthly_plan, parse_levels
 from src.env import get
+from src.gm import PRESETS as GM_PRESETS
 from src.gm import SCHEMES as GM_SCHEMES
 from src.gm import gm_ladder
 from src.metrics import (
@@ -429,9 +430,9 @@ with d2:
 # ------------------------------------------------------------------ GM-калькулятор
 st.subheader("GM-калькулятор: продажа по уровням")
 st.caption(
-    "Схема «кумулятивно»: к уровню X% продано суммарно X% исходной позиции. "
-    "«Равными долями» — на каждом уровне по 1/n позиции. Уровни работают и вверх "
-    "(фиксация прибыли), и вниз (сокращение риска в GM-пуле)."
+    "Схема по умолчанию — «моя схема»: уровни 10…80%, доли 10/10/12/13/15/15/10/5, "
+    "продаётся 90% позиции. Альтернативы: «кумулятивно» (к уровню X% продано суммарно "
+    "X%) и «равными долями». Уровни работают и вверх (фиксация), и вниз (сокращение риска)."
 )
 
 g1, g2 = st.columns([1, 2])
@@ -449,10 +450,18 @@ with g1:
     )
     gm_dir = st.radio("Направление", ("рост", "падение"), horizontal=True, key="gm_dir")
     gm_scheme = st.selectbox("Схема продаж", GM_SCHEMES, key="gm_scheme")
-    gm_levels_raw = st.text_input("Уровни, %", value="10, 30, 50, 70", key="gm_levels")
+    if gm_scheme == "моя схема":
+        st.caption(
+            "Уровни 10…80% с долями 10/10/12/13/15/15/10/5 — продаётся 90% позиции."
+        )
+        gm_levels = list(GM_PRESETS["моя схема"]["levels"])
+    else:
+        gm_levels_raw = st.text_input(
+            "Уровни, %", value="10, 30, 50, 70", key="gm_levels"
+        )
+        gm_levels = parse_levels(gm_levels_raw)
 
 with g2:
-    gm_levels = parse_levels(gm_levels_raw)
     if not gm_levels:
         st.error("Укажи хотя бы один уровень, например: 10, 30, 50, 70")
     else:
@@ -465,7 +474,8 @@ with g2:
         if gm_plan:
             g_m1, g_m2, g_m3 = st.columns(3)
             g_m1.metric(
-                "Продать сейчас", f"{gm_plan['sell_now']:,.2f}", f"${gm_plan['revenue_now']:,.0f}"
+                "Продать сейчас", f"{gm_plan['sell_now']:,.2f}",
+                f"${gm_plan['revenue_now']:,.0f}" if gm_plan["sell_now"] else None,
             )
             g_m2.metric(
                 "Остаток", f"{gm_plan['remaining_now']:,.2f}",
