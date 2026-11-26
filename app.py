@@ -18,6 +18,8 @@ from src.config import AAVE_PARAMS, APP_VERSION, THRESHOLDS
 from src.data import portfolio_snapshot
 from src.dca import SCHEMES, dca_plan, monthly_plan, parse_levels
 from src.env import get
+from src.gm import SCHEMES as GM_SCHEMES
+from src.gm import gm_ladder
 from src.metrics import (
     allocations,
     carry_report,
@@ -424,6 +426,82 @@ with d2:
                 f"по средней ${plan['avg_price']:,.0f}."
             )
 
+# ------------------------------------------------------------------ GM-калькулятор
+st.subheader("GM-калькулятор: продажа по уровням")
+st.caption(
+    "Схема «кумулятивно»: к уровню X% продано суммарно X% исходной позиции. "
+    "«Равными долями» — на каждом уровне по 1/n позиции. Уровни работают и вверх "
+    "(фиксация прибыли), и вниз (сокращение риска в GM-пуле)."
+)
+
+g1, g2 = st.columns([1, 2])
+with g1:
+    gm_entry = st.number_input(
+        "Входная цена GM, $", min_value=0.0001, value=1.0, step=0.01,
+        format="%.4f", key="gm_entry",
+    )
+    gm_current = st.number_input(
+        "Текущая цена GM, $", min_value=0.0001, value=1.0, step=0.01,
+        format="%.4f", key="gm_current",
+    )
+    gm_qty = st.number_input(
+        "Количество токенов GM", min_value=0.0001, value=80.0, step=1.0, key="gm_qty"
+    )
+    gm_dir = st.radio("Направление", ("рост", "падение"), horizontal=True, key="gm_dir")
+    gm_scheme = st.selectbox("Схема продаж", GM_SCHEMES, key="gm_scheme")
+    gm_levels_raw = st.text_input("Уровни, %", value="10, 30, 50, 70", key="gm_levels")
+
+with g2:
+    gm_levels = parse_levels(gm_levels_raw)
+    if not gm_levels:
+        st.error("Укажи хотя бы один уровень, например: 10, 30, 50, 70")
+    else:
+        try:
+            gm_plan = gm_ladder(gm_entry, gm_current, gm_qty, gm_levels, gm_dir, gm_scheme)
+        except Exception as exc:
+            st.error(f"Не посчитать GM-план: {exc}")
+            gm_plan = None
+
+        if gm_plan:
+            g_m1, g_m2, g_m3 = st.columns(3)
+            g_m1.metric(
+                "Продать сейчас", f"{gm_plan['sell_now']:,.2f}", f"${gm_plan['revenue_now']:,.0f}"
+            )
+            g_m2.metric(
+                "Остаток", f"{gm_plan['remaining_now']:,.2f}",
+                f"продано {gm_plan['sold_pct']:.0f}%", delta_color="off",
+            )
+            g_m3.metric(
+                "Средняя продажа",
+                f"${gm_plan['avg_sell_price']:,.4f}" if gm_plan["avg_sell_price"] else "—",
+                f"вход ${gm_plan['entry_price']:,.4f}", delta_color="off",
+            )
+            st.caption(
+                f"Цена {gm_plan['change_pct']:+.1f}% от входа. Количество — в токенах GM."
+            )
+
+            gm_table = pd.DataFrame(
+                [
+                    {
+                        "Уровень": f"{'+' if gm_dir == 'рост' else '−'}{r['level']:.0f}%",
+                        "Цена GM": f"${r['price']:,.4f}",
+                        "Продать GM": f"{r['sell_qty']:,.2f}",
+                        "Продано всего": f"{r['cumulative_pct']:.0f}%",
+                        "Остаток GM": f"{r['remaining']:,.2f}",
+                        "Выручка": f"${r['revenue']:,.0f}",
+                        "P&L": f"${r['pnl']:+,.0f}",
+                        "Статус": "пора продавать" if r["passed"] else "ждём",
+                    }
+                    for r in gm_plan["rows"]
+                ]
+            )
+            st.dataframe(gm_table, hide_index=True, width="stretch")
+            st.caption(
+                "P&L считается к входной цене по проданному объёму. "
+                "«Продать сейчас» — сумма уровней, которые уже пройдены."
+            )
+
+# ------------------------------------------------------------------ месячный режим
 st.subheader("Месячный режим: рынок + резерв")
 st.caption(
     "Регулярная часть покупает по календарю и не зависит от цены. Резерв копится "
