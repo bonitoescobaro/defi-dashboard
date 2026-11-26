@@ -20,7 +20,6 @@ from src.env import get
 from src.metrics import (
     allocations,
     carry_report,
-    cluster_summary,
     dust,
     health_factor_report,
 )
@@ -389,23 +388,24 @@ def render_portfolio() -> None:
         st.dataframe(view, hide_index=True, width="stretch", height=430)
 
     with right:
-        clusters = cluster_summary(df)
+        pie_src = df[["token", "cluster", "value", "share_pct"]].copy()
         pie = (
-            alt.Chart(clusters)
+            alt.Chart(pie_src)
             .mark_arc(innerRadius=48, outerRadius=148)
             .encode(
                 theta=alt.Theta("value:Q"),
                 color=alt.Color(
-                    "cluster:N",
-                    legend=alt.Legend(title=None, orient="bottom", columns=2),
+                    "token:N",
+                    legend=alt.Legend(title=None, orient="bottom", columns=3),
                 ),
                 tooltip=[
+                    alt.Tooltip("token:N", title="Токен"),
                     alt.Tooltip("cluster:N", title="Кластер"),
-                    alt.Tooltip("value:Q", title="Стоимость, $", format=",.0f"),
+                    alt.Tooltip("value:Q", title="Стоимость, $", format=",.2f"),
                     alt.Tooltip("share_pct:Q", title="Доля, %", format=".1f"),
                 ],
             )
-            .properties(height=430, title="Доли по кластерам")
+            .properties(height=430, title="Доли по токенам")
         )
         st.altair_chart(pie, width="stretch")
 
