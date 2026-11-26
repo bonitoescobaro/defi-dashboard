@@ -428,88 +428,94 @@ with d2:
             )
 
 # ------------------------------------------------------------------ GM-калькулятор
-st.subheader("GM-калькулятор: продажа по уровням")
+st.subheader("GM-калькулятор: BTC и ETH")
 st.caption(
-    "Схема по умолчанию — «моя схема»: уровни 10…80%, доли 10/10/12/13/15/15/10/5, "
-    "продаётся 90% позиции. Альтернативы: «кумулятивно» (к уровню X% продано суммарно "
-    "X%) и «равными долями». Уровни работают и вверх (фиксация), и вниз (сокращение риска)."
+    "Как в таблице: уровни считаются от базовой цены актива, доли берутся из схемы "
+    "(по умолчанию 10/10/12/13/15/15/10/5 — продаётся 90% позиции). Переключатель "
+    "направления строит лестницу вниз или вверх."
 )
 
-g1, g2 = st.columns([1, 2])
-with g1:
-    gm_entry = st.number_input(
-        "Входная цена GM, $", min_value=0.0001, value=1.0, step=0.01,
-        format="%.4f", key="gm_entry",
-    )
-    gm_current = st.number_input(
-        "Текущая цена GM, $", min_value=0.0001, value=1.0, step=0.01,
-        format="%.4f", key="gm_current",
-    )
-    gm_qty = st.number_input(
-        "Количество токенов GM", min_value=0.0001, value=80.0, step=1.0, key="gm_qty"
-    )
-    gm_dir = st.radio("Направление", ("рост", "падение"), horizontal=True, key="gm_dir")
+gc1, gc2, gc3 = st.columns([1, 1, 1])
+with gc1:
+    gm_dir = st.radio("Направление", ("падение", "рост"), horizontal=True, key="gm_dir")
+with gc2:
     gm_scheme = st.selectbox("Схема продаж", GM_SCHEMES, key="gm_scheme")
+with gc3:
     if gm_scheme == "моя схема":
-        st.caption(
-            "Уровни 10…80% с долями 10/10/12/13/15/15/10/5 — продаётся 90% позиции."
-        )
         gm_levels = list(GM_PRESETS["моя схема"]["levels"])
+        st.caption("Уровни 10…80%")
     else:
-        gm_levels_raw = st.text_input(
-            "Уровни, %", value="10, 30, 50, 70", key="gm_levels"
+        gm_levels = parse_levels(
+            st.text_input("Уровни, %", value="10, 30, 50, 70", key="gm_levels")
         )
-        gm_levels = parse_levels(gm_levels_raw)
 
-with g2:
-    if not gm_levels:
-        st.error("Укажи хотя бы один уровень, например: 10, 30, 50, 70")
+
+def gm_table(
+    base_price: float,
+    qty: float,
+    direction: str,
+    scheme: str,
+    levels: list[float],
+    asset: str,
+) -> pd.DataFrame:
+    """Таблица продаж в формате исходной: уровень, цена, доля, продать, остаток."""
+    plan = gm_ladder(base_price, base_price, qty, levels, direction, scheme)
+    level_col = "Падение" if direction == "падение" else "Рост"
+    price_col = f"Цена {asset}"
+    sign = "−" if direction == "падение" else "+"
+
+    rows = [
+        {
+            level_col: f"{sign}{r['level']:.0f}%",
+            price_col: f"${r['price']:,.0f}",
+            "Доля": f"{r['share_pct']:.0f}%",
+            "Продать": f"{r['sell_qty']:,.2f}",
+            "Остаток": f"{r['remaining']:,.2f}",
+        }
+        for r in plan["rows"]
+    ]
+    last = plan["rows"][-1]
+    rows.append(
+        {
+            level_col: "Итого",
+            price_col: "",
+            "Доля": f"{last['cumulative_pct']:.0f}%",
+            "Продать": f"{last['sold_cum']:,.2f}",
+            "Остаток": f"{last['remaining']:,.2f}",
+        }
+    )
+    return pd.DataFrame(rows)
+
+
+gb, ge = st.columns(2)
+
+with gb:
+    btc_base = st.number_input(
+        "Цена BTC, $", min_value=1.0, value=80000.0, step=1000.0, key="gm_btc_base"
+    )
+    btc_qty = st.number_input(
+        "GM-BTC, токенов", min_value=0.0001, value=80.0, step=1.0, key="gm_btc_qty"
+    )
+    if gm_levels:
+        st.dataframe(
+            gm_table(btc_base, btc_qty, gm_dir, gm_scheme, gm_levels, "BTC"),
+            hide_index=True, width="stretch",
+        )
     else:
-        try:
-            gm_plan = gm_ladder(gm_entry, gm_current, gm_qty, gm_levels, gm_dir, gm_scheme)
-        except Exception as exc:
-            st.error(f"Не посчитать GM-план: {exc}")
-            gm_plan = None
+        st.error("Укажи хотя бы один уровень")
 
-        if gm_plan:
-            g_m1, g_m2, g_m3 = st.columns(3)
-            g_m1.metric(
-                "Продать сейчас", f"{gm_plan['sell_now']:,.2f}",
-                f"${gm_plan['revenue_now']:,.0f}" if gm_plan["sell_now"] else None,
-            )
-            g_m2.metric(
-                "Остаток", f"{gm_plan['remaining_now']:,.2f}",
-                f"продано {gm_plan['sold_pct']:.0f}%", delta_color="off",
-            )
-            g_m3.metric(
-                "Средняя продажа",
-                f"${gm_plan['avg_sell_price']:,.4f}" if gm_plan["avg_sell_price"] else "—",
-                f"вход ${gm_plan['entry_price']:,.4f}", delta_color="off",
-            )
-            st.caption(
-                f"Цена {gm_plan['change_pct']:+.1f}% от входа. Количество — в токенах GM."
-            )
-
-            gm_table = pd.DataFrame(
-                [
-                    {
-                        "Уровень": f"{'+' if gm_dir == 'рост' else '−'}{r['level']:.0f}%",
-                        "Цена GM": f"${r['price']:,.4f}",
-                        "Продать GM": f"{r['sell_qty']:,.2f}",
-                        "Продано всего": f"{r['cumulative_pct']:.0f}%",
-                        "Остаток GM": f"{r['remaining']:,.2f}",
-                        "Выручка": f"${r['revenue']:,.0f}",
-                        "P&L": f"${r['pnl']:+,.0f}",
-                        "Статус": "пора продавать" if r["passed"] else "ждём",
-                    }
-                    for r in gm_plan["rows"]
-                ]
-            )
-            st.dataframe(gm_table, hide_index=True, width="stretch")
-            st.caption(
-                "P&L считается к входной цене по проданному объёму. "
-                "«Продать сейчас» — сумма уровней, которые уже пройдены."
-            )
+with ge:
+    eth_base = st.number_input(
+        "Цена ETH, $", min_value=1.0, value=2500.0, step=50.0, key="gm_eth_base"
+    )
+    eth_qty = st.number_input(
+        "GM-ETH, токенов", min_value=0.0001, value=94.3, step=0.1, key="gm_eth_qty"
+    )
+    if gm_levels:
+        st.dataframe(
+            gm_table(eth_base, eth_qty, gm_dir, gm_scheme, gm_levels, "ETH"),
+            hide_index=True, width="stretch",
+        )
 
 # ------------------------------------------------------------------ месячный режим
 st.subheader("Месячный режим: рынок + резерв")
